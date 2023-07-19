@@ -56,9 +56,10 @@ depthFirstTraversal(const TreeNodeIndex* childOffsets, C&& continuationCriterion
 
     constexpr int maxStackDepth = 64;
     TreeNodeIndex stack[maxStackDepth];
-    stack[0] = 0;
+    constexpr int stackBottom = -1; // a special value that cannot be obtained during traversal.
+    stack[0] = stackBottom;
 
-    TreeNodeIndex stackPos = 1;
+    TreeNodeIndex stackPos = 1; // current stack depth
     TreeNodeIndex node     = 0; // start at the root
 
     do
@@ -83,7 +84,7 @@ depthFirstTraversal(const TreeNodeIndex* childOffsets, C&& continuationCriterion
         }
         node = stack[--stackPos];
 
-    } while (node != 0); // the root can only be obtained when the tree has been fully traversed
+    } while (node != stackBottom);
 }
 
 /*! @brief findNeighbors of particle number @p id within a radius. Works on CPU and GPU.

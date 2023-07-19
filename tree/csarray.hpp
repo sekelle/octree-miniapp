@@ -82,20 +82,6 @@ std::size_t nNodes(const Vector& tree)
     return tree.size() - 1;
 }
 
-//! @brief return first node that starts at or below (contains) key
-template<class KeyType>
-HOST_DEVICE_FUN inline TreeNodeIndex findNodeBelow(const KeyType* tree, TreeNodeIndex numNodes, KeyType key)
-{
-    return stl::upper_bound(tree, tree + numNodes, key) - tree - 1;
-}
-
-//! @brief return first node that starts at or above key
-template<class KeyType>
-HOST_DEVICE_FUN inline TreeNodeIndex findNodeAbove(const KeyType* tree, TreeNodeIndex numNodes, KeyType key)
-{
-    return stl::lower_bound(tree, tree + numNodes, key) - tree;
-}
-
 //! @brief count particles in one tree node
 template<class KeyType>
 HOST_DEVICE_FUN unsigned calculateNodeCount(
@@ -115,7 +101,7 @@ HOST_DEVICE_FUN unsigned calculateNodeCount(
  * @param[in]    tree         octree nodes given as SFC codes of length @a nNodes+1
  *                            needs to satisfy the octree invariants
  * @param[inout] counts       output particle counts per node, length = @a nNodes
- * @param[in]    nNodes       number of nodes in tree
+ * @param[in]    numNodes     number of nodes in tree
  * @param[in]    codesStart   sorted particle SFC code range start
  * @param[in]    codesEnd     sorted particle SFC code range end
  * @param[in]    maxCount     maximum particle count per node to store
@@ -123,41 +109,15 @@ HOST_DEVICE_FUN unsigned calculateNodeCount(
 template<class KeyType>
 void computeNodeCounts(const KeyType* tree,
                        unsigned* counts,
-                       TreeNodeIndex nNodes,
-                       const KeyType* codesStart,
-                       const KeyType* codesEnd,
+                       TreeNodeIndex numNodes,
+                       const KeyType *codesStart,
+                       const KeyType *codesEnd,
                        unsigned maxCount)
 {
-    TreeNodeIndex firstNode = 0;
-    TreeNodeIndex lastNode  = nNodes;
-    if (codesStart != codesEnd)
-    {
-        firstNode = std::upper_bound(tree, tree + nNodes, *codesStart) - tree - 1;
-        lastNode  = std::upper_bound(tree, tree + nNodes, *(codesEnd - 1)) - tree;
-        assert(firstNode <= lastNode && "Are your particle codes sorted?");
-    }
-    else
-    {
-        firstNode = nNodes;
-        lastNode  = nNodes;
-    }
-
 #pragma omp parallel for schedule(static)
-    for (TreeNodeIndex i = 0; i < firstNode; ++i)
-        counts[i] = 0;
-
-#pragma omp parallel for schedule(static)
-    for (TreeNodeIndex i = lastNode; i < nNodes; ++i)
-        counts[i] = 0;
-
-    TreeNodeIndex nNonZeroNodes  = lastNode - firstNode;
-    const KeyType* populatedTree = tree + firstNode;
-
-#pragma omp parallel for schedule(static)
-    for (TreeNodeIndex i = 0; i < nNonZeroNodes; ++i)
+    for (TreeNodeIndex i = 0; i < numNodes; ++i)
     {
-        counts[i + firstNode] =
-            calculateNodeCount(populatedTree[i], populatedTree[i + 1], codesStart, codesEnd, maxCount);
+        counts[i] = calculateNodeCount(tree[i], tree[i + 1], codesStart, codesEnd, maxCount);
     }
 }
 
@@ -275,15 +235,8 @@ processNode(TreeNodeIndex nodeIndex, const KeyType* oldTree, const TreeNodeIndex
     {
         for (int sibling = 0; sibling < 8; ++sibling)
         {
+            // insert new nodes
             newTree[newNodeIndex + sibling] = thisNode + sibling * nodeRange<KeyType>(level + 1);
-        }
-    }
-    else if (opCode > 8)
-    {
-        unsigned levelDiff = log8ceil(unsigned(opCode));
-        for (int sibling = 0; sibling < opCode; ++sibling)
-        {
-            newTree[newNodeIndex + sibling] = thisNode + sibling * nodeRange<KeyType>(level + levelDiff);
         }
     }
 }

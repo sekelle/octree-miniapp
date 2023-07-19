@@ -55,25 +55,6 @@ __global__ void computeNodeCountsKernel(const KeyType* tree,
     if (tid < nNodes) { counts[tid] = calculateNodeCount(tree[tid], tree[tid + 1], codesStart, codesEnd, maxCount); }
 }
 
-//! @brief used to communicate required node search range for computeNodeCountsKernel back to host
-__device__ TreeNodeIndex populatedNodes[2];
-
-template<class KeyType>
-__global__ void
-findPopulatedNodes(const KeyType* tree, TreeNodeIndex nNodes, const KeyType* codesStart, const KeyType* codesEnd)
-{
-    if (threadIdx.x == 0 && codesStart != codesEnd)
-    {
-        populatedNodes[0] = stl::upper_bound(tree, tree + nNodes, *codesStart) - tree - 1;
-        populatedNodes[1] = stl::upper_bound(tree, tree + nNodes, *(codesEnd - 1)) - tree;
-    }
-    else
-    {
-        populatedNodes[0] = nNodes;
-        populatedNodes[1] = nNodes;
-    }
-}
-
 template<class KeyType>
 void computeNodeCountsGpu(const KeyType* tree,
                           unsigned* counts,
@@ -82,17 +63,9 @@ void computeNodeCountsGpu(const KeyType* tree,
                           const KeyType* lastKey,
                           unsigned maxCount)
 {
-    TreeNodeIndex popNodes[2];
-
-    findPopulatedNodes<<<1, 1>>>(tree, numNodes, firstKey, lastKey);
-    checkGpuErrors(cudaMemcpyFromSymbol(popNodes, populatedNodes, 2 * sizeof(TreeNodeIndex)));
-
-    checkGpuErrors(cudaMemset(counts, 0, popNodes[0] * sizeof(unsigned)));
-    checkGpuErrors(cudaMemset(counts + popNodes[1], 0, (numNodes - popNodes[1]) * sizeof(unsigned)));
-
-    constexpr unsigned nThreads = 256;
-    computeNodeCountsKernel<<<iceil(popNodes[1] - popNodes[0], nThreads), nThreads>>>(
-        tree + popNodes[0], counts + popNodes[0], popNodes[1] - popNodes[0], firstKey, lastKey, maxCount);
+    constexpr unsigned numThreads = 256;
+    computeNodeCountsKernel<<<iceil(numNodes, numThreads), numThreads>>>(tree, counts, numNodes, firstKey, lastKey,
+                                                                         maxCount);
 }
 
 //! @brief this symbol is used to keep track of octree structure changes and detect convergence
