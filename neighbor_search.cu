@@ -57,7 +57,7 @@ __global__ void findNeighborsKernel(const T* x, const T* y, const T* z, const T*
 }
 
 template<class T, class KeyType>
-void benchmarkGpu()
+void benchmarkGpu(bool verbose = false)
 {
     Box<T> box{0, 1, BoundaryType::open};
     int    numParticles = 2000000;
@@ -105,8 +105,11 @@ void benchmarkGpu()
     float cpuTime = timeCpu(findNeighborsCpu);
 
     std::cout << "CPU time " << cpuTime << " s" << std::endl;
-    std::copy(neighborsCountCPU.data(), neighborsCountCPU.data() + 64, std::ostream_iterator<int>(std::cout, " "));
-    std::cout << std::endl;
+    if (verbose)
+    {
+        std::copy(neighborsCountCPU.data(), neighborsCountCPU.data() + 64, std::ostream_iterator<int>(std::cout, " "));
+        std::cout << std::endl;
+    }
 
     std::vector<cstone::LocalIndex> neighborsGPU(maxNeighbors * numParticles);
     std::vector<unsigned>           neighborsCountGPU(numParticles);
@@ -147,8 +150,11 @@ void benchmarkGpu()
     thrust::copy(d_neighbors.begin(), d_neighbors.end(), neighborsGPU.begin());
 
     std::cout << "GPU time " << gpuTime / 1000 << " s" << std::endl;
-    std::copy(neighborsCountGPU.data(), neighborsCountGPU.data() + 64, std::ostream_iterator<int>(std::cout, " "));
-    std::cout << std::endl;
+    if (verbose)
+    {
+        std::copy(neighborsCountGPU.data(), neighborsCountGPU.data() + 64, std::ostream_iterator<int>(std::cout, " "));
+        std::cout << std::endl;
+    }
 
     int numFails     = 0;
     int numFailsList = 0;
@@ -174,7 +180,7 @@ void benchmarkGpu()
 
         if (neighborsCountGPU[i] != neighborsCountCPU[i])
         {
-            std::cout << i << " " << neighborsCountGPU[i] << " " << neighborsCountCPU[i] << std::endl;
+            if (verbose) std::cout << i << " " << neighborsCountGPU[i] << " " << neighborsCountCPU[i] << std::endl;
             numFails++;
         }
 
