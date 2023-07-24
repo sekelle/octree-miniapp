@@ -45,35 +45,30 @@
 using namespace cstone;
 
 template<class T, class KeyType>
-__global__ void findNeighborsKernel(const T* x, const T* y, const T* z, const T* h, LocalIndex firstId,
-                                    LocalIndex lastId, const Box<T> box, const OctreeNsView<T, KeyType> treeView,
-                                    unsigned ngmax, LocalIndex* neighbors, unsigned* neighborsCount)
+__global__ void findNeighborsKernel(const T* x, const T* y, const T* z, const T* h, LocalIndex numParticles,
+                                    const Box<T> box, const OctreeNsView<T, KeyType> treeView, unsigned ngmax,
+                                    LocalIndex* neighbors, unsigned* neighborsCount)
 {
     cstone::LocalIndex tid = blockDim.x * blockIdx.x + threadIdx.x;
-    cstone::LocalIndex id  = firstId + tid;
-    if (id >= lastId) { return; }
+    if (tid >= numParticles) { return; }
 
-    neighborsCount[id] = findNeighbors(id, x, y, z, h, treeView, box, ngmax, neighbors + tid * ngmax);
+    neighborsCount[tid] = findNeighbors(tid, x, y, z, h, treeView, box, ngmax, neighbors + tid * ngmax);
 }
 
 template<class T, class KeyType>
-void benchmarkGpu(bool verbose = false)
+void benchmarkGpu(int numParticles, bool verbose)
 {
     Box<T> box{0, 1, BoundaryType::open};
-    int    numParticles = 2000000;
+    int    maxNeighbors = 200;
 
+    /****** Particle data and tree generation ****************/
     RandomCoordinates<T, KeyType> coords(numParticles, box);
     std::vector<T>                h(numParticles, 0.012);
 
-    int maxNeighbors = 200;
-
-    std::vector<LocalIndex> neighborsCPU(maxNeighbors * numParticles);
-    std::vector<unsigned>   neighborsCountCPU(numParticles);
-
-    const T*    x    = coords.x().data();
-    const T*    y    = coords.y().data();
-    const T*    z    = coords.z().data();
-    const auto* keys = (KeyType*)(coords.particleKeys().data());
+    const T*       x    = coords.x().data();
+    const T*       y    = coords.y().data();
+    const T*       z    = coords.z().data();
+    const KeyType* keys = coords.particleKeys().data();
 
     unsigned bucketSize   = 64; // maximum number of particles per leaf node
     auto [csTree, counts] = computeOctree(keys, keys + numParticles, bucketSize);
@@ -91,6 +86,10 @@ void benchmarkGpu(bool verbose = false)
 
     OctreeNsView<T, KeyType> treeView{nodeCenters.data(), nodeSizes.data(), octree.childOffsets.data(),
                                       octree.internalToLeaf.data(), layout.data()};
+
+    /****** CPU output data ****************/
+    std::vector<LocalIndex> neighborsCPU(maxNeighbors * numParticles);
+    std::vector<unsigned>   neighborsCountCPU(numParticles);
 
     auto findNeighborsCpu = [&]()
     {
@@ -110,6 +109,17 @@ void benchmarkGpu(bool verbose = false)
         std::copy(neighborsCountCPU.data(), neighborsCountCPU.data() + 64, std::ostream_iterator<int>(std::cout, " "));
         std::cout << std::endl;
     }
+
+    /****** Verification: compare against all-2-all ****************/
+    if (numParticles <= 10000)
+    {
+        std::vector<unsigned> neighborsCountRef(numParticles);
+        findNeighborsAll2All(x, y, z, h.data(), numParticles, neighborsCountRef.data());
+
+        bool pass = std::equal(neighborsCountCPU.begin(), neighborsCountCPU.end(), neighborsCountRef.begin());
+        std::cout << "CPU all-2-all reference: " << (pass ? "PASS" : "FAIL") << std::endl;
+    }
+    else { std::cout << "CPU all-2-all reference: SKIPPED (numParticles > 10000)" << std::endl; }
 
     /****** Upload input data to GPU ****************/
     thrust::device_vector<T> d_x(coords.x().begin(), coords.x().end());
@@ -137,7 +147,7 @@ void benchmarkGpu(bool verbose = false)
         findNeighborsBT(0, numParticles, rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), treeViewGpu, box,
                         rawPtr(d_neighborsCount), rawPtr(d_neighbors), maxNeighbors);
 #else
-        findNeighborsKernel<<<iceil(numParticles, 128), 128>>>(rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), 0,
+        findNeighborsKernel<<<iceil(numParticles, 128), 128>>>(rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h),
                                                                numParticles, box, treeViewGpu, maxNeighbors,
                                                                rawPtr(d_neighbors), rawPtr(d_neighborsCount));
 #endif
@@ -190,16 +200,24 @@ void benchmarkGpu(bool verbose = false)
             numFails++;
         }
 
+        // Also check if the neighbors are the same, not just the number of neighbors
         if (!std::equal(begin(nilist), end(nilist), neighborsCPU.begin() + i * maxNeighbors)) { numFailsList++; }
     }
 
     bool allEqual = std::equal(begin(neighborsCountGPU), end(neighborsCountGPU), begin(neighborsCountCPU));
     if (allEqual)
-        std::cout << "Neighbor counts: PASS\n";
+        std::cout << "GPU neighbor counts: PASS\n";
     else
-        std::cout << "Neighbor counts: FAIL " << numFails << std::endl;
+        std::cout << "GPU neighbor counts: FAIL " << numFails << std::endl;
 
     std::cout << "numFailsList " << numFailsList << std::endl;
 }
 
-int main() { benchmarkGpu<double, uint64_t>(); }
+int main(int argc, char** argv)
+{
+    int  numParticles = (argc > 1) ? std::stoi(argv[1]) : 10000;
+    bool verbose      = false;
+
+    std::cout << "Performing neighbor search for " << numParticles << " particles." << std::endl;
+    benchmarkGpu<double, uint64_t>(numParticles, verbose);
+}

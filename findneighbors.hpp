@@ -41,8 +41,8 @@ namespace cstone
 
 //! @brief generic depth-first traversal of an octree that works on CPU and GPU with customizable descent criteria
 template<class C, class A>
-HOST_DEVICE_FUN void
-depthFirstTraversal(const TreeNodeIndex* childOffsets, C&& continuationCriterion, A&& endpointAction)
+HOST_DEVICE_FUN void depthFirstTraversal(const TreeNodeIndex* childOffsets, C&& continuationCriterion,
+                                         A&& endpointAction)
 {
     bool descend = continuationCriterion(0);
     if (!descend) return;
@@ -57,7 +57,7 @@ depthFirstTraversal(const TreeNodeIndex* childOffsets, C&& continuationCriterion
     constexpr int maxStackDepth = 64;
     TreeNodeIndex stack[maxStackDepth];
     constexpr int stackBottom = -1; // a special value that cannot be obtained during traversal.
-    stack[0] = stackBottom;
+    stack[0]                  = stackBottom;
 
     TreeNodeIndex stackPos = 1; // current stack depth
     TreeNodeIndex node     = 0; // start at the root
@@ -66,8 +66,8 @@ depthFirstTraversal(const TreeNodeIndex* childOffsets, C&& continuationCriterion
     {
         for (int octant = 0; octant < 8; ++octant)
         {
-            TreeNodeIndex child = childOffsets[node] + octant;
-            bool descend        = continuationCriterion(child);
+            TreeNodeIndex child   = childOffsets[node] + octant;
+            bool          descend = continuationCriterion(child);
             if (descend)
             {
                 if (childOffsets[child] == 0)
@@ -87,7 +87,7 @@ depthFirstTraversal(const TreeNodeIndex* childOffsets, C&& continuationCriterion
     } while (node != stackBottom);
 }
 
-/*! @brief findNeighbors of particle number @p id within a radius. Works on CPU and GPU.
+/*! @brief findNeighbors of particle number @p i within a radius. Works on CPU and GPU.
  *
  * @tparam     T               coordinate type, float or double
  * @tparam     KeyType         32- or 64-bit Morton or Hilbert key type
@@ -103,19 +103,13 @@ depthFirstTraversal(const TreeNodeIndex* childOffsets, C&& continuationCriterion
  * @return                     neighbor count of particle @p i
  */
 template<class T, class KeyType>
-HOST_DEVICE_FUN unsigned findNeighbors(LocalIndex i,
-                                       const T* x,
-                                       const T* y,
-                                       const T* z,
-                                       const T* h,
-                                       const OctreeNsView<T, KeyType>& tree,
-                                       const Box<T>& box,
-                                       unsigned ngmax,
+HOST_DEVICE_FUN unsigned findNeighbors(LocalIndex i, const T* x, const T* y, const T* z, const T* h,
+                                       const OctreeNsView<T, KeyType>& tree, const Box<T>& box, unsigned ngmax,
                                        LocalIndex* neighbors)
 {
-    Vec3<T> target{x[i], y[i], z[i]};
-    T hi                  = h[i];
-    T radiusSq            = 4.0 * hi * hi;
+    Vec3<T>  target{x[i], y[i], z[i]};
+    T        hi           = h[i];
+    T        radiusSq     = 4.0 * hi * hi;
     unsigned numNeighbors = 0;
 
     auto overlaps = [target, radiusSq, centers = tree.centers, sizes = tree.sizes, &box](TreeNodeIndex idx)
@@ -127,9 +121,9 @@ HOST_DEVICE_FUN unsigned findNeighbors(LocalIndex i,
 
     auto searchBox = [i, target, radiusSq, &tree, x, y, z, ngmax, neighbors, &numNeighbors](TreeNodeIndex idx)
     {
-        TreeNodeIndex leafIdx    = tree.internalToLeaf[idx];
-        LocalIndex firstParticle = tree.layout[leafIdx];
-        LocalIndex lastParticle  = tree.layout[leafIdx + 1];
+        TreeNodeIndex leafIdx       = tree.internalToLeaf[idx];
+        LocalIndex    firstParticle = tree.layout[leafIdx];
+        LocalIndex    lastParticle  = tree.layout[leafIdx + 1];
 
         for (LocalIndex j = firstParticle; j < lastParticle; ++j)
         {
@@ -147,27 +141,22 @@ HOST_DEVICE_FUN unsigned findNeighbors(LocalIndex i,
     return numNeighbors;
 }
 
-//! @brief OpenMP parallel CPU version of neighbor search
-template<class T, class KeyType>
-void findNeighbors(const T* x,
-                   const T* y,
-                   const T* z,
-                   const T* h,
-                   LocalIndex firstId,
-                   LocalIndex lastId,
-                   const Box<T>& box,
-                   const OctreeNsView<T, KeyType>& treeView,
-                   unsigned ngmax,
-                   LocalIndex* neighbors,
-                   unsigned* neighborsCount)
+//! @brief O(N^2) all-2-all neighbor search for verification
+template<class T>
+void findNeighborsAll2All(const T* x, const T* y, const T* z, const T* h, LocalIndex numParticles, unsigned* counts)
 {
-    LocalIndex numWork = lastId - firstId;
-
-#pragma omp parallel for
-    for (LocalIndex i = 0; i < numWork; ++i)
+#pragma omp parallel for schedule(static)
+    for (LocalIndex i = 0; i < numParticles; ++i)
     {
-        LocalIndex id     = i + firstId;
-        neighborsCount[i] = findNeighbors(id, x, y, z, h, treeView, box, ngmax, neighbors + i * ngmax);
+        Vec3<T> pi{x[i], y[i], z[i]};
+        T       ri    = 2 * h[i];
+        T       ri_sq = ri * ri;
+
+        unsigned count_i = 0;
+        for (LocalIndex j = 0; j < numParticles; ++j)
+            if (norm2(pi - Vec3<T>{x[j], y[j], z[j]}) < ri_sq) count_i++;
+
+        counts[i] = count_i - 1; // subtract self-reference
     }
 }
 
