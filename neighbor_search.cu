@@ -40,22 +40,14 @@
 #include "findneighbors_warps.cuh"
 
 // uncomment to enable warp-level optimized neighbor search
-//#define USE_WARPS
+// #define USE_WARPS
 
 using namespace cstone;
 
 template<class T, class KeyType>
-__global__ void findNeighborsKernel(const T* x,
-                                    const T* y,
-                                    const T* z,
-                                    const T* h,
-                                    LocalIndex firstId,
-                                    LocalIndex lastId,
-                                    const Box<T> box,
-                                    const OctreeNsView<T, KeyType> treeView,
-                                    unsigned ngmax,
-                                    LocalIndex* neighbors,
-                                    unsigned* neighborsCount)
+__global__ void findNeighborsKernel(const T* x, const T* y, const T* z, const T* h, LocalIndex firstId,
+                                    LocalIndex lastId, const Box<T> box, const OctreeNsView<T, KeyType> treeView,
+                                    unsigned ngmax, LocalIndex* neighbors, unsigned* neighborsCount)
 {
     cstone::LocalIndex tid = blockDim.x * blockIdx.x + threadIdx.x;
     cstone::LocalIndex id  = firstId + tid;
@@ -68,28 +60,28 @@ template<class T, class KeyType>
 void benchmarkGpu()
 {
     Box<T> box{0, 1, BoundaryType::open};
-    int numParticles = 2000000;
+    int    numParticles = 2000000;
 
     RandomCoordinates<T, KeyType> coords(numParticles, box);
-    std::vector<T> h(numParticles, 0.012);
+    std::vector<T>                h(numParticles, 0.012);
 
     int maxNeighbors = 200;
 
     std::vector<LocalIndex> neighborsCPU(maxNeighbors * numParticles);
-    std::vector<unsigned> neighborsCountCPU(numParticles);
+    std::vector<unsigned>   neighborsCountCPU(numParticles);
 
-    const T *x = coords.x().data();
-    const T *y = coords.y().data();
-    const T *z = coords.z().data();
-    const auto *keys = (KeyType *) (coords.particleKeys().data());
+    const T*    x    = coords.x().data();
+    const T*    y    = coords.y().data();
+    const T*    z    = coords.z().data();
+    const auto* keys = (KeyType*)(coords.particleKeys().data());
 
-    unsigned bucketSize = 64; // maximum number of particles per leaf node
+    unsigned bucketSize   = 64; // maximum number of particles per leaf node
     auto [csTree, counts] = computeOctree(keys, keys + numParticles, bucketSize);
     OctreeData<KeyType, CpuTag> octree;
     octree.resize(nNodes(csTree));
     updateInternalTree<KeyType>(csTree.data(), octree.data());
-    const TreeNodeIndex *childOffsets = octree.childOffsets.data();
-    const TreeNodeIndex *toLeafOrder  = octree.internalToLeaf.data();
+    const TreeNodeIndex* childOffsets = octree.childOffsets.data();
+    const TreeNodeIndex* toLeafOrder  = octree.internalToLeaf.data();
 
     std::vector<LocalIndex> layout(nNodes(csTree) + 1);
     std::exclusive_scan(counts.begin(), counts.end() + 1, layout.begin(), 0);
@@ -117,37 +109,35 @@ void benchmarkGpu()
     std::cout << std::endl;
 
     std::vector<cstone::LocalIndex> neighborsGPU(maxNeighbors * numParticles);
-    std::vector<unsigned> neighborsCountGPU(numParticles);
+    std::vector<unsigned>           neighborsCountGPU(numParticles);
 
     thrust::device_vector<T> d_x(coords.x().begin(), coords.x().end());
     thrust::device_vector<T> d_y(coords.y().begin(), coords.y().end());
     thrust::device_vector<T> d_z(coords.z().begin(), coords.z().end());
     thrust::device_vector<T> d_h = h;
 
-    thrust::device_vector<Vec3<T>> d_nodeCenters          = nodeCenters;
-    thrust::device_vector<Vec3<T>> d_nodeSizes            = nodeSizes;
+    thrust::device_vector<Vec3<T>>       d_nodeCenters    = nodeCenters;
+    thrust::device_vector<Vec3<T>>       d_nodeSizes      = nodeSizes;
     thrust::device_vector<TreeNodeIndex> d_childOffsets   = octree.childOffsets;
-    thrust::device_vector<TreeNodeIndex> d_internalToLeaf       = octree.internalToLeaf;
-    thrust::device_vector<LocalIndex> d_layout               = layout;
+    thrust::device_vector<TreeNodeIndex> d_internalToLeaf = octree.internalToLeaf;
+    thrust::device_vector<LocalIndex>    d_layout         = layout;
 
     OctreeNsView<T, KeyType> nsViewGpu{rawPtr(d_nodeCenters), rawPtr(d_nodeSizes), rawPtr(d_childOffsets),
                                        rawPtr(d_internalToLeaf), rawPtr(d_layout)};
 
     thrust::device_vector<LocalIndex> d_neighbors(neighborsGPU.size());
-    thrust::device_vector<unsigned> d_neighborsCount(neighborsCountGPU.size());
+    thrust::device_vector<unsigned>   d_neighborsCount(neighborsCountGPU.size());
 
-    thrust::device_vector<KeyType> d_codes(coords.particleKeys().begin(), coords.particleKeys().end());
-
-    auto    findNeighborsLambda = [&]()
+    auto findNeighborsLambda = [&]()
     {
 #ifdef USE_WARPS
         // the fast warp-aware version
         findNeighborsBT(0, n, rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), nsViewGpu, box,
                         rawPtr(d_neighborsCount), rawPtr(d_neighbors), maxNeighbors);
 #else
-        findNeighborsKernel<<<iceil(numParticles, 128), 128>>>(rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), 0, numParticles, box,
-                                                               nsViewGpu, maxNeighbors, rawPtr(d_neighbors),
-                                                               rawPtr(d_neighborsCount));
+        findNeighborsKernel<<<iceil(numParticles, 128), 128>>>(rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), 0,
+                                                               numParticles, box, nsViewGpu, maxNeighbors,
+                                                               rawPtr(d_neighbors), rawPtr(d_neighborsCount));
 #endif
     };
 
@@ -164,7 +154,8 @@ void benchmarkGpu()
     int numFailsList = 0;
     for (int i = 0; i < numParticles; ++i)
     {
-        std::sort(neighborsCPU.data() + i * maxNeighbors, neighborsCPU.data() + i * maxNeighbors + neighborsCountCPU[i]);
+        std::sort(neighborsCPU.data() + i * maxNeighbors,
+                  neighborsCPU.data() + i * maxNeighbors + neighborsCountCPU[i]);
 
         std::vector<cstone::LocalIndex> nilist(neighborsCountGPU[i]);
         for (unsigned j = 0; j < neighborsCountGPU[i]; ++j)
