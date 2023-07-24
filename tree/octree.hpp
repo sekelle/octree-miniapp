@@ -321,7 +321,16 @@ void updateInternalTree(const KeyType* leaves, OctreeView<KeyType> o)
                    o.internalToLeaf, o.leafToInternal);
 }
 
-//! @brief compute geometric node centers based on node SFC keys and the global bounding box
+/*! @brief compute geometric node centers based on node SFC keys and the global bounding box
+ *
+ * @tparam KeyType       32- or 64-bit unsigned integer
+ * @tparam T             float or double
+ * @param[in]  prefixes  SFC prefix key of each tree node, length = @p numNodes
+ * @param[in]  numNodes  number of nodes
+ * @param[out] centers   geometric center of each node, length = @p numNodes
+ * @param[out] sizes     extent from center in 3 dimensions for each node, length = @p numNodes
+ * @param[in]  box       coordinate bounding box
+ */
 template<class KeyType, class T>
 void nodeFpCenters(const KeyType* prefixes, TreeNodeIndex numNodes, Vec3<T>* centers, Vec3<T>* sizes, const Box<T>& box)
 {

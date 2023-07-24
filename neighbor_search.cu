@@ -68,47 +68,47 @@ template<class T, class KeyType>
 void benchmarkGpu()
 {
     Box<T> box{0, 1, BoundaryType::open};
-    int n = 2000000;
+    int numParticles = 2000000;
 
-    RandomCoordinates<T, KeyType> coords(n, box);
-    std::vector<T> h(n, 0.012);
+    RandomCoordinates<T, KeyType> coords(numParticles, box);
+    std::vector<T> h(numParticles, 0.012);
 
     int maxNeighbors = 200;
 
-    std::vector<LocalIndex> neighborsCPU(maxNeighbors * n);
-    std::vector<unsigned> neighborsCountCPU(n);
+    std::vector<LocalIndex> neighborsCPU(maxNeighbors * numParticles);
+    std::vector<unsigned> neighborsCountCPU(numParticles);
 
-    const T* x        = coords.x().data();
-    const T* y        = coords.y().data();
-    const T* z        = coords.z().data();
-    const auto* codes = (KeyType*)(coords.particleKeys().data());
+    const T *x = coords.x().data();
+    const T *y = coords.y().data();
+    const T *z = coords.z().data();
+    const auto *keys = (KeyType *) (coords.particleKeys().data());
 
-    unsigned bucketSize   = 64;
-    auto [csTree, counts] = computeOctree(codes, codes + n, bucketSize);
+    unsigned bucketSize = 64; // maximum number of particles per leaf node
+    auto [csTree, counts] = computeOctree(keys, keys + numParticles, bucketSize);
     OctreeData<KeyType, CpuTag> octree;
     octree.resize(nNodes(csTree));
     updateInternalTree<KeyType>(csTree.data(), octree.data());
-    const TreeNodeIndex* childOffsets = octree.childOffsets.data();
-    const TreeNodeIndex* toLeafOrder  = octree.internalToLeaf.data();
+    const TreeNodeIndex *childOffsets = octree.childOffsets.data();
+    const TreeNodeIndex *toLeafOrder  = octree.internalToLeaf.data();
 
     std::vector<LocalIndex> layout(nNodes(csTree) + 1);
     std::exclusive_scan(counts.begin(), counts.end() + 1, layout.begin(), 0);
 
-    std::vector<Vec3<T>> centers(octree.numNodes), sizes(octree.numNodes);
-    nodeFpCenters(octree.prefixes.data(), octree.numNodes, centers.data(), sizes.data(), box);
+    std::vector<Vec3<T>> nodeCenters(octree.numNodes), nodeSizes(octree.numNodes);
+    nodeFpCenters(octree.prefixes.data(), octree.numNodes, nodeCenters.data(), nodeSizes.data(), box);
 
     OctreeNsView<T, KeyType> nsView{octree.prefixes.data(),
                                     octree.childOffsets.data(),
                                     octree.internalToLeaf.data(),
                                     octree.levelRange.data(),
                                     layout.data(),
-                                    centers.data(),
-                                    sizes.data()};
+                                    nodeCenters.data(),
+                                    nodeSizes.data()};
 
     auto findNeighborsCpu = [&]()
     {
 #pragma omp parallel for
-        for (LocalIndex i = 0; i < n; ++i)
+        for (LocalIndex i = 0; i < numParticles; ++i)
         {
             neighborsCountCPU[i] =
                 findNeighbors(i, x, y, z, h.data(), nsView, box, maxNeighbors, neighborsCPU.data() + i * maxNeighbors);
@@ -121,8 +121,8 @@ void benchmarkGpu()
     std::copy(neighborsCountCPU.data(), neighborsCountCPU.data() + 64, std::ostream_iterator<int>(std::cout, " "));
     std::cout << std::endl;
 
-    std::vector<cstone::LocalIndex> neighborsGPU(maxNeighbors * n);
-    std::vector<unsigned> neighborsCountGPU(n);
+    std::vector<cstone::LocalIndex> neighborsGPU(maxNeighbors * numParticles);
+    std::vector<unsigned> neighborsCountGPU(numParticles);
 
     thrust::device_vector<T> d_x(coords.x().begin(), coords.x().end());
     thrust::device_vector<T> d_y(coords.y().begin(), coords.y().end());
@@ -134,12 +134,12 @@ void benchmarkGpu()
     thrust::device_vector<TreeNodeIndex> d_internalToLeaf = octree.internalToLeaf;
     thrust::device_vector<TreeNodeIndex> d_levelRange     = octree.levelRange;
     thrust::device_vector<LocalIndex> d_layout            = layout;
-    thrust::device_vector<Vec3<T>> d_centers              = centers;
-    thrust::device_vector<Vec3<T>> d_sizes                = sizes;
+    thrust::device_vector<Vec3<T>> d_nodeCenters          = nodeCenters;
+    thrust::device_vector<Vec3<T>> d_nodeSizes            = nodeSizes;
 
     OctreeNsView<T, KeyType> nsViewGpu{rawPtr(d_prefixes),   rawPtr(d_childOffsets), rawPtr(d_internalToLeaf),
-                                       rawPtr(d_levelRange), rawPtr(d_layout),       rawPtr(d_centers),
-                                       rawPtr(d_sizes)};
+                                       rawPtr(d_levelRange), rawPtr(d_layout),       rawPtr(d_nodeCenters),
+                                       rawPtr(d_nodeSizes)};
 
     thrust::device_vector<LocalIndex> d_neighbors(neighborsGPU.size());
     thrust::device_vector<unsigned> d_neighborsCount(neighborsCountGPU.size());
@@ -153,10 +153,9 @@ void benchmarkGpu()
         findNeighborsBT(0, n, rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), nsViewGpu, box,
                         rawPtr(d_neighborsCount), rawPtr(d_neighbors), maxNeighbors);
 #else
-
-        findNeighborsKernel<<<iceil(n, 128), 128>>>(rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), 0, n, box,
-                                                    nsViewGpu, maxNeighbors, rawPtr(d_neighbors),
-                                                    rawPtr(d_neighborsCount));
+        findNeighborsKernel<<<iceil(numParticles, 128), 128>>>(rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), 0, numParticles, box,
+                                                               nsViewGpu, maxNeighbors, rawPtr(d_neighbors),
+                                                               rawPtr(d_neighborsCount));
 #endif
     };
 
@@ -171,7 +170,7 @@ void benchmarkGpu()
 
     int numFails     = 0;
     int numFailsList = 0;
-    for (int i = 0; i < n; ++i)
+    for (int i = 0; i < numParticles; ++i)
     {
         std::sort(neighborsCPU.data() + i * maxNeighbors, neighborsCPU.data() + i * maxNeighbors + neighborsCountCPU[i]);
 
