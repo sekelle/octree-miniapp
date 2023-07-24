@@ -89,16 +89,16 @@ void benchmarkGpu()
     std::vector<Vec3<T>> nodeCenters(octree.numNodes), nodeSizes(octree.numNodes);
     nodeFpCenters(octree.prefixes.data(), octree.numNodes, nodeCenters.data(), nodeSizes.data(), box);
 
-    OctreeNsView<T, KeyType> nsView{nodeCenters.data(), nodeSizes.data(), octree.childOffsets.data(),
-                                    octree.internalToLeaf.data(), layout.data()};
+    OctreeNsView<T, KeyType> treeView{nodeCenters.data(), nodeSizes.data(), octree.childOffsets.data(),
+                                      octree.internalToLeaf.data(), layout.data()};
 
     auto findNeighborsCpu = [&]()
     {
 #pragma omp parallel for
         for (LocalIndex i = 0; i < numParticles; ++i)
         {
-            neighborsCountCPU[i] =
-                findNeighbors(i, x, y, z, h.data(), nsView, box, maxNeighbors, neighborsCPU.data() + i * maxNeighbors);
+            neighborsCountCPU[i] = findNeighbors(i, x, y, z, h.data(), treeView, box, maxNeighbors,
+                                                 neighborsCPU.data() + i * maxNeighbors);
         }
     };
 
@@ -120,23 +120,23 @@ void benchmarkGpu()
     thrust::device_vector<Vec3<T>>       d_nodeSizes      = nodeSizes;
     thrust::device_vector<TreeNodeIndex> d_childOffsets   = octree.childOffsets;
     thrust::device_vector<TreeNodeIndex> d_internalToLeaf = octree.internalToLeaf;
-    thrust::device_vector<LocalIndex>    d_layout         = layout;
+    thrust::device_vector<LocalIndex> d_layout         = layout;
 
-    OctreeNsView<T, KeyType> nsViewGpu{rawPtr(d_nodeCenters), rawPtr(d_nodeSizes), rawPtr(d_childOffsets),
-                                       rawPtr(d_internalToLeaf), rawPtr(d_layout)};
+    OctreeNsView<T, KeyType> treeViewGpu{rawPtr(d_nodeCenters), rawPtr(d_nodeSizes), rawPtr(d_childOffsets),
+                                         rawPtr(d_internalToLeaf), rawPtr(d_layout)};
 
     thrust::device_vector<LocalIndex> d_neighbors(neighborsGPU.size());
-    thrust::device_vector<unsigned>   d_neighborsCount(neighborsCountGPU.size());
+    thrust::device_vector<unsigned> d_neighborsCount(neighborsCountGPU.size());
 
-    auto findNeighborsLambda = [&]()
+    auto    findNeighborsLambda = [&]()
     {
 #ifdef USE_WARPS
         // the fast warp-aware version
-        findNeighborsBT(0, n, rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), nsViewGpu, box,
+        findNeighborsBT(0, numParticles, rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), treeViewGpu, box,
                         rawPtr(d_neighborsCount), rawPtr(d_neighbors), maxNeighbors);
 #else
         findNeighborsKernel<<<iceil(numParticles, 128), 128>>>(rawPtr(d_x), rawPtr(d_y), rawPtr(d_z), rawPtr(d_h), 0,
-                                                               numParticles, box, nsViewGpu, maxNeighbors,
+                                                               numParticles, box, treeViewGpu, maxNeighbors,
                                                                rawPtr(d_neighbors), rawPtr(d_neighborsCount));
 #endif
     };
