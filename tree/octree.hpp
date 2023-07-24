@@ -239,11 +239,8 @@ struct OctreeView
 template<class T, class KeyType>
 struct OctreeNsView
 {
-    //! @brief see OctreeData
-    const KeyType* prefixes;
     const TreeNodeIndex* childOffsets;
     const TreeNodeIndex* internalToLeaf;
-    const TreeNodeIndex* levelRange;
 
     //! @brief index of first particle for each node
     const LocalIndex* layout;
