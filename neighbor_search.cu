@@ -97,11 +97,8 @@ void benchmarkGpu()
     std::vector<Vec3<T>> nodeCenters(octree.numNodes), nodeSizes(octree.numNodes);
     nodeFpCenters(octree.prefixes.data(), octree.numNodes, nodeCenters.data(), nodeSizes.data(), box);
 
-    OctreeNsView<T, KeyType> nsView{octree.childOffsets.data(),
-                                    octree.internalToLeaf.data(),
-                                    layout.data(),
-                                    nodeCenters.data(),
-                                    nodeSizes.data()};
+    OctreeNsView<T, KeyType> nsView{nodeCenters.data(), nodeSizes.data(), octree.childOffsets.data(),
+                                    octree.internalToLeaf.data(), layout.data()};
 
     auto findNeighborsCpu = [&]()
     {
@@ -127,23 +124,21 @@ void benchmarkGpu()
     thrust::device_vector<T> d_z(coords.z().begin(), coords.z().end());
     thrust::device_vector<T> d_h = h;
 
-    thrust::device_vector<TreeNodeIndex> d_childOffsets   = octree.childOffsets;
-    thrust::device_vector<TreeNodeIndex> d_internalToLeaf = octree.internalToLeaf;
-    thrust::device_vector<TreeNodeIndex> d_levelRange     = octree.levelRange;
-    thrust::device_vector<LocalIndex> d_layout            = layout;
     thrust::device_vector<Vec3<T>> d_nodeCenters          = nodeCenters;
     thrust::device_vector<Vec3<T>> d_nodeSizes            = nodeSizes;
+    thrust::device_vector<TreeNodeIndex> d_childOffsets   = octree.childOffsets;
+    thrust::device_vector<TreeNodeIndex> d_internalToLeaf       = octree.internalToLeaf;
+    thrust::device_vector<LocalIndex> d_layout               = layout;
 
-    OctreeNsView<T, KeyType> nsViewGpu{rawPtr(d_childOffsets), rawPtr(d_internalToLeaf),
-                                       rawPtr(d_layout),       rawPtr(d_nodeCenters),
-                                       rawPtr(d_nodeSizes)};
+    OctreeNsView<T, KeyType> nsViewGpu{rawPtr(d_nodeCenters), rawPtr(d_nodeSizes), rawPtr(d_childOffsets),
+                                       rawPtr(d_internalToLeaf), rawPtr(d_layout)};
 
     thrust::device_vector<LocalIndex> d_neighbors(neighborsGPU.size());
     thrust::device_vector<unsigned> d_neighborsCount(neighborsCountGPU.size());
 
     thrust::device_vector<KeyType> d_codes(coords.particleKeys().begin(), coords.particleKeys().end());
 
-    auto findNeighborsLambda = [&]()
+    auto    findNeighborsLambda = [&]()
     {
 #ifdef USE_WARPS
         // the fast warp-aware version

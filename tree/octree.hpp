@@ -239,14 +239,17 @@ struct OctreeView
 template<class T, class KeyType>
 struct OctreeNsView
 {
-    const TreeNodeIndex* childOffsets;
-    const TreeNodeIndex* internalToLeaf;
-
-    //! @brief index of first particle for each node
-    const LocalIndex* layout;
     //! @brief geometrical node centers and sizes
     const Vec3<T>* centers;
     const Vec3<T>* sizes;
+
+    //! @brief Index of first child of each node. Stores 0 if the node is a leaf
+    const TreeNodeIndex* childOffsets;
+    //! @brief map a node index of a leaf from fully linked format to leaf-only format in
+    const TreeNodeIndex* internalToLeaf;
+
+    //! @brief index of first particle contained in the node for each leaf node
+    const LocalIndex* layout;
 };
 
 template<class KeyType, class Accelerator>
