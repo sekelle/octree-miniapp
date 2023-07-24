@@ -111,9 +111,7 @@ void benchmarkGpu(bool verbose = false)
         std::cout << std::endl;
     }
 
-    std::vector<cstone::LocalIndex> neighborsGPU(maxNeighbors * numParticles);
-    std::vector<unsigned>           neighborsCountGPU(numParticles);
-
+    /****** Upload input data to GPU ****************/
     thrust::device_vector<T> d_x(coords.x().begin(), coords.x().end());
     thrust::device_vector<T> d_y(coords.y().begin(), coords.y().end());
     thrust::device_vector<T> d_z(coords.z().begin(), coords.z().end());
@@ -123,15 +121,16 @@ void benchmarkGpu(bool verbose = false)
     thrust::device_vector<Vec3<T>>       d_nodeSizes      = nodeSizes;
     thrust::device_vector<TreeNodeIndex> d_childOffsets   = octree.childOffsets;
     thrust::device_vector<TreeNodeIndex> d_internalToLeaf = octree.internalToLeaf;
-    thrust::device_vector<LocalIndex> d_layout         = layout;
+    thrust::device_vector<LocalIndex>    d_layout         = layout;
 
     OctreeNsView<T, KeyType> treeViewGpu{rawPtr(d_nodeCenters), rawPtr(d_nodeSizes), rawPtr(d_childOffsets),
                                          rawPtr(d_internalToLeaf), rawPtr(d_layout)};
 
-    thrust::device_vector<LocalIndex> d_neighbors(neighborsGPU.size());
-    thrust::device_vector<unsigned> d_neighborsCount(neighborsCountGPU.size());
+    /****** GPU output data ****************/
+    thrust::device_vector<LocalIndex> d_neighbors(numParticles * maxNeighbors);
+    thrust::device_vector<unsigned>   d_neighborsCount(numParticles);
 
-    auto    findNeighborsLambda = [&]()
+    auto findNeighborsLambda = [&]()
     {
 #ifdef USE_WARPS
         // the fast warp-aware version
@@ -145,11 +144,18 @@ void benchmarkGpu(bool verbose = false)
     };
 
     float gpuTime = timeGpu(findNeighborsLambda);
+    std::cout << "GPU time " << gpuTime / 1000 << " s" << std::endl;
+
+    /****** Download GPU results ****************/
+
+    std::vector<cstone::LocalIndex> neighborsGPU(maxNeighbors * numParticles);
+    std::vector<unsigned>           neighborsCountGPU(numParticles);
 
     thrust::copy(d_neighborsCount.begin(), d_neighborsCount.end(), neighborsCountGPU.begin());
     thrust::copy(d_neighbors.begin(), d_neighbors.end(), neighborsGPU.begin());
 
-    std::cout << "GPU time " << gpuTime / 1000 << " s" << std::endl;
+    /****** Verification: compare against CPU ****************/
+
     if (verbose)
     {
         std::copy(neighborsCountGPU.data(), neighborsCountGPU.data() + 64, std::ostream_iterator<int>(std::cout, " "));
