@@ -294,9 +294,9 @@ bool updateOctree(const KeyType* codesStart,
     std::vector<TreeNodeIndex> nodeOps(nNodes(tree) + 1);
     bool converged = rebalanceDecision(tree.data(), counts.data(), nNodes(tree), bucketSize, nodeOps.data());
 
-    std::vector<KeyType> newTree;
-    rebalanceTree(tree, newTree, nodeOps.data());
-    swap(tree, newTree);
+    std::vector<KeyType> tmpTree;
+    rebalanceTree(tree, tmpTree, nodeOps.data());
+    swap(tree, tmpTree);
 
     counts.resize(nNodes(tree));
     computeNodeCounts(tree.data(), counts.data(), nNodes(tree), codesStart, codesEnd, maxCount);
