@@ -84,7 +84,7 @@ public:
     const std::vector<T>& x() const { return x_; }
     const std::vector<T>& y() const { return y_; }
     const std::vector<T>& z() const { return z_; }
-    const std::vector<KeyType>& particleKeys() const { return keys_; }
+    const std::vector<KeyType>& keys() const { return keys_; }
 
 private:
     Box<T> box_;

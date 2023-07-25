@@ -29,55 +29,61 @@
  * @author Sebastian Keller <sebastian.f.keller@gmail.com>
  */
 
-#include <chrono>
 #include <iostream>
 #include <numeric>
 
 #include "util/random.hpp"
 #include "tree/octree.hpp"
+#include "util/timing.cuh"
 
 using namespace cstone;
-
-template<class KeyType>
-std::tuple<std::vector<KeyType>, std::vector<unsigned>>
-build_tree(const KeyType* firstCode, const KeyType* lastCode, unsigned bucketSize)
-{
-    std::vector<KeyType> tree;
-    std::vector<unsigned> counts;
-
-    auto tp0               = std::chrono::high_resolution_clock::now();
-    std::tie(tree, counts) = computeOctree(firstCode, lastCode, bucketSize);
-    auto tp1               = std::chrono::high_resolution_clock::now();
-
-    double t0 = std::chrono::duration<double>(tp1 - tp0).count();
-    std::cout << "build time from scratch " << t0 << " nNodes(tree): " << nNodes(tree)
-              << " count: " << std::accumulate(begin(counts), end(counts), 0lu) << std::endl;
-
-    tp0 = std::chrono::high_resolution_clock::now();
-    updateOctree(firstCode, lastCode, bucketSize, tree, counts, std::numeric_limits<unsigned>::max());
-    tp1 = std::chrono::high_resolution_clock::now();
-
-    double t1 = std::chrono::duration<double>(tp1 - tp0).count();
-
-    int nEmptyNodes = std::count(begin(counts), end(counts), 0);
-    std::cout << "build time with guess " << t1 << " nNodes(tree): " << nNodes(tree)
-              << " count: " << std::accumulate(begin(counts), end(counts), 0lu) << " empty nodes: " << nEmptyNodes
-              << std::endl;
-
-    return std::make_tuple(std::move(tree), std::move(counts));
-}
 
 int main()
 {
     using KeyType = uint64_t;
     Box<double> box{-1, 1};
 
-    int numParticles = 2000000;
-    int bucketSize   = 16;
+    unsigned numParticles = 2000000;
+    unsigned bucketSize   = 16;
 
-    RandomCoordinates<double, KeyType> randomBox(numParticles, box);
+    RandomCoordinates<double, KeyType> coords(numParticles, box);
 
-    // tree build from random coordinates
-    [[maybe_unused]] auto [tree, counts] =
-        build_tree(randomBox.particleKeys().data(), randomBox.particleKeys().data() + numParticles, bucketSize);
+    // initialize with the root node containing all particles
+    std::vector<KeyType> octree{0, nodeRange<KeyType>(0)};
+    // note brace initializer: this vector has length 1
+    std::vector<unsigned> counts{numParticles};
+
+    auto fullBuild = [&]()
+    {
+        while (!updateOctree(coords.keys().data(), coords.keys().data() + numParticles, bucketSize, octree, counts))
+            ;
+    };
+
+    float buildTime = timeCpu(fullBuild);
+    std::cout << "build time from scratch " << buildTime << " nNodes(tree): " << nNodes(octree)
+              << " particle count: " << std::accumulate(begin(counts), end(counts), 0lu) << std::endl;
+
+    auto updateTree = [&]()
+    { updateOctree(coords.keys().data(), coords.keys().data() + numParticles, bucketSize, octree, counts); };
+
+    float updateTime    = timeCpu(updateTree);
+    long  numEmptyNodes = std::count(begin(counts), end(counts), 0);
+
+    std::cout << "build time with guess " << updateTime << " nNodes(tree): " << nNodes(octree)
+              << " particle count: " << std::accumulate(begin(counts), end(counts), 0lu)
+              << " empty nodes: " << numEmptyNodes << std::endl;
+
+    OctreeData<KeyType, CpuTag> linkedOctree;
+    linkedOctree.resize(nNodes(octree));
+    auto buildInternal = [&]() { updateInternalTree<KeyType>(rawPtr(octree), linkedOctree.data()); };
+
+    float internalBuildTime = timeCpu(buildInternal);
+    std::cout << "linked octree build time " << internalBuildTime << std::endl << std::endl;
+
+    for (int i = 0; i < linkedOctree.levelRange.size(); ++i)
+    {
+        int numNodes = linkedOctree.levelRange[i + 1] - linkedOctree.levelRange[i];
+        if (numNodes == 0) { break; }
+        std::cout << "number of nodes at level " << i << ": " << numNodes << std::endl;
+    }
 }

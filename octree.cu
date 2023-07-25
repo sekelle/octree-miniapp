@@ -52,41 +52,47 @@ int main()
 
     RandomCoordinates<double, KeyType> randomBox(numParticles, box);
 
-    thrust::device_vector<KeyType> tree    = std::vector<KeyType>{0, nodeRange<KeyType>(0)};
+    thrust::device_vector<KeyType>  octree = std::vector<KeyType>{0, nodeRange<KeyType>(0)};
     thrust::device_vector<unsigned> counts = std::vector<unsigned>{numParticles};
 
-    thrust::device_vector<KeyType> tmpTree;
+    thrust::device_vector<KeyType>       tmpTree;
     thrust::device_vector<TreeNodeIndex> workArray;
 
-    thrust::device_vector<KeyType> particleCodes(randomBox.particleKeys().begin(), randomBox.particleKeys().end());
+    thrust::device_vector<KeyType> particleKeys(randomBox.keys().begin(), randomBox.keys().end());
 
     auto fullBuild = [&]()
     {
-        while (!updateOctreeGpu(rawPtr(particleCodes), rawPtr(particleCodes) + numParticles, bucketSize, tree, counts,
+        while (!updateOctreeGpu(rawPtr(particleKeys), rawPtr(particleKeys) + numParticles, bucketSize, octree, counts,
                                 tmpTree, workArray))
             ;
     };
 
     float buildTime = timeGpu(fullBuild);
-    std::cout << "build time from scratch " << buildTime / 1000 << " nNodes(tree): " << nNodes(tree)
-              << " count: " << thrust::reduce(counts.begin(), counts.end(), 0) << std::endl;
+    std::cout << "build time from scratch " << buildTime / 1000 << " nNodes(tree): " << nNodes(octree)
+              << " particle count: " << thrust::reduce(counts.begin(), counts.end(), 0) << std::endl;
 
     auto updateTree = [&]()
     {
-        updateOctreeGpu(rawPtr(particleCodes), rawPtr(particleCodes) + numParticles, bucketSize, tree, counts, tmpTree,
+        updateOctreeGpu(rawPtr(particleKeys), rawPtr(particleKeys) + numParticles, bucketSize, octree, counts, tmpTree,
                         workArray);
     };
 
     float updateTime = timeGpu(updateTree);
-    std::cout << "build time with guess " << updateTime / 1000 << " nNodes(tree): " << nNodes(tree)
-              << " count: " << thrust::reduce(counts.begin(), counts.end(), 0) << std::endl;
+    std::cout << "build time with guess " << updateTime / 1000 << " nNodes(tree): " << nNodes(octree)
+              << " particle count: " << thrust::reduce(counts.begin(), counts.end(), 0) << std::endl;
 
-    // internal octree benchmark
-    OctreeData<KeyType, GpuTag> octree;
-    octree.resize(nNodes(tree));
-    auto buildInternal = [&]() { buildOctreeGpu(rawPtr(tree), octree.data()); };
+    OctreeData<KeyType, GpuTag> linkedOctree;
+    linkedOctree.resize(nNodes(octree));
+    auto buildInternal = [&]() { buildOctreeGpu(rawPtr(octree), linkedOctree.data()); };
 
-    float internalBuildTime                   = timeGpu(buildInternal);
-    thrust::host_vector<TreeNodeIndex> ranges = octree.levelRange;
-    std::cout << "internal octree build time " << internalBuildTime / 1000 << std::endl;
+    float internalBuildTime = timeGpu(buildInternal);
+    std::cout << "linked octree build time " << internalBuildTime / 1000 << std::endl << std::endl;
+
+    thrust::host_vector<TreeNodeIndex> levelRange = linkedOctree.levelRange; // download from GPU
+    for (int i = 0; i < levelRange.size(); ++i)
+    {
+        int numNodes = levelRange[i + 1] - levelRange[i];
+        if (numNodes == 0) { break; }
+        std::cout << "number of nodes at level " << i << ": " << numNodes << std::endl;
+    }
 }

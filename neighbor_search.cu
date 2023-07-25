@@ -68,7 +68,7 @@ void benchmarkGpu(int numParticles, bool verbose)
     const T*       x    = coords.x().data();
     const T*       y    = coords.y().data();
     const T*       z    = coords.z().data();
-    const KeyType* keys = coords.particleKeys().data();
+    const KeyType* keys = coords.keys().data();
 
     unsigned bucketSize   = 64; // maximum number of particles per leaf node
     auto [csTree, counts] = computeOctree(keys, keys + numParticles, bucketSize);
