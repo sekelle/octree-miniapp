@@ -71,6 +71,8 @@ void computeNodeCountsGpu(const KeyType* tree,
 //! @brief this symbol is used to keep track of octree structure changes and detect convergence
 __device__ int rebalanceChangeCounter;
 
+__global__ void resetRebalanceCounter() { rebalanceChangeCounter = 0; }
+
 /*! @brief Compute split or fuse decision for each octree node in parallel
  *
  * @tparam KeyType         32- or 64-bit unsigned integer type
@@ -103,24 +105,6 @@ __global__ void rebalanceDecisionKernel(
     }
 }
 
-/*! @brief construct new nodes in the balanced tree
- *
- * @tparam KeyType         32- or 64-bit unsigned integer type
- * @param[in]  oldTree     old cornerstone octree, length = numOldNodes + 1
- * @param[in]  nodeOps     transformation codes for old tree, length = numOldNodes + 1
- * @param[in]  numOldNodes number of nodes in @a oldTree
- * @param[out] newTree     the rebalanced tree, length = nodeOps[numOldNodes] + 1
- */
-template<class KeyType>
-__global__ void
-processNodes(const KeyType* oldTree, const TreeNodeIndex* nodeOps, TreeNodeIndex numOldNodes, KeyType* newTree)
-{
-    unsigned tid = blockDim.x * blockIdx.x + threadIdx.x;
-    if (tid < numOldNodes) { processNode(tid, oldTree, nodeOps, newTree); }
-}
-
-__global__ void resetRebalanceCounter() { rebalanceChangeCounter = 0; }
-
 template<class KeyType>
 TreeNodeIndex computeNodeOpsGpu(
     const KeyType* tree, TreeNodeIndex numNodes, const unsigned* counts, unsigned bucketSize, TreeNodeIndex* nodeOps)
@@ -137,6 +121,22 @@ TreeNodeIndex computeNodeOpsGpu(
     thrust::copy_n(thrust::device_pointer_cast(nodeOps) + nodeOpsSize - 1, 1, &newNumNodes);
 
     return newNumNodes;
+}
+
+/*! @brief construct new nodes in the balanced tree
+ *
+ * @tparam KeyType         32- or 64-bit unsigned integer type
+ * @param[in]  oldTree     old cornerstone octree, length = numOldNodes + 1
+ * @param[in]  nodeOps     transformation codes for old tree, length = numOldNodes + 1
+ * @param[in]  numOldNodes number of nodes in @a oldTree
+ * @param[out] newTree     the rebalanced tree, length = nodeOps[numOldNodes] + 1
+ */
+template<class KeyType>
+__global__ void
+processNodes(const KeyType* oldTree, const TreeNodeIndex* nodeOps, TreeNodeIndex numOldNodes, KeyType* newTree)
+{
+    unsigned tid = blockDim.x * blockIdx.x + threadIdx.x;
+    if (tid < numOldNodes) { processNode(tid, oldTree, nodeOps, newTree); }
 }
 
 template<class KeyType>
