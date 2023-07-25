@@ -105,8 +105,9 @@ __global__ void rebalanceDecisionKernel(
     }
 }
 
+//! @brief see rebalanceDecisionKernel
 template<class KeyType>
-TreeNodeIndex computeNodeOpsGpu(
+bool rebalanceDecisionGpu(
     const KeyType* tree, TreeNodeIndex numNodes, const unsigned* counts, unsigned bucketSize, TreeNodeIndex* nodeOps)
 {
     resetRebalanceCounter<<<1, 1>>>();
@@ -114,18 +115,15 @@ TreeNodeIndex computeNodeOpsGpu(
     constexpr unsigned nThreads = 512;
     rebalanceDecisionKernel<<<iceil(numNodes, nThreads), nThreads>>>(tree, counts, numNodes, bucketSize, nodeOps);
 
-    size_t nodeOpsSize = numNodes + 1;
-    thrust::exclusive_scan(thrust::device, nodeOps, nodeOps + nodeOpsSize, nodeOps);
+    int changeCounter;
+    checkGpuErrors(cudaMemcpyFromSymbol(&changeCounter, rebalanceChangeCounter, sizeof(int)));
 
-    TreeNodeIndex newNumNodes;
-    thrust::copy_n(thrust::device_pointer_cast(nodeOps) + nodeOpsSize - 1, 1, &newNumNodes);
-
-    return newNumNodes;
+    return changeCounter == 0;
 }
 
 /*! @brief construct new nodes in the balanced tree
  *
- * @tparam KeyType         32- or 64-bit unsigned integer type
+ * @tparam     KeyType     32- or 64-bit unsigned integer type
  * @param[in]  oldTree     old cornerstone octree, length = numOldNodes + 1
  * @param[in]  nodeOps     transformation codes for old tree, length = numOldNodes + 1
  * @param[in]  numOldNodes number of nodes in @a oldTree
@@ -133,32 +131,40 @@ TreeNodeIndex computeNodeOpsGpu(
  */
 template<class KeyType>
 __global__ void
-processNodes(const KeyType* oldTree, const TreeNodeIndex* nodeOps, TreeNodeIndex numOldNodes, KeyType* newTree)
+processNodesKernel(const KeyType* oldTree, const TreeNodeIndex* nodeOps, TreeNodeIndex numOldNodes, KeyType* newTree)
 {
     unsigned tid = blockDim.x * blockIdx.x + threadIdx.x;
     if (tid < numOldNodes) { processNode(tid, oldTree, nodeOps, newTree); }
 }
 
-template<class KeyType>
-bool rebalanceTreeGpu(const KeyType* tree,
-                      TreeNodeIndex numNodes,
-                      TreeNodeIndex newNumNodes,
-                      const TreeNodeIndex* nodeOps,
-                      KeyType* newTree)
+/*! @brief carry out rebalance from the old tree to the new one
+ *
+ * @param[in]  tree      the old tree
+ * @param[out] newTree   the new rebalanced tree
+ * @param[in]  nodeOps   the decision what to do with each node in the old tree, will be overwritten
+ */
+template<class InputVector, class OutputVector>
+void rebalanceTreeGpu(const InputVector& tree,
+                      OutputVector& newTree,
+                      TreeNodeIndex* nodeOps)
 {
-    constexpr unsigned nThreads = 512;
-    processNodes<<<iceil(numNodes, nThreads), nThreads>>>(tree, nodeOps, numNodes, newTree);
-    thrust::fill_n(thrust::device_pointer_cast(newTree + newNumNodes), 1, nodeRange<KeyType>(0));
+    TreeNodeIndex numNodes = nNodes(tree);
 
-    int changeCounter;
-    checkGpuErrors(cudaMemcpyFromSymbol(&changeCounter, rebalanceChangeCounter, sizeof(int)));
+    thrust::exclusive_scan(thrust::device, nodeOps, nodeOps + numNodes + 1, nodeOps);
 
-    return changeCounter == 0;
+    TreeNodeIndex newNumNodes;
+    thrust::copy_n(thrust::device_pointer_cast(nodeOps) + numNodes, 1, &newNumNodes);
+
+    newTree.resize(newNumNodes + 1);
+
+    constexpr unsigned numThreads = 512;
+    processNodesKernel<<<iceil(numNodes, numThreads), numThreads>>>(rawPtr(tree), nodeOps, numNodes, rawPtr(newTree));
+    newTree.back() = tree.back();
 }
 
 /*! @brief update the octree with a single rebalance/count step
  *
- * @tparam KeyType           32- or 64-bit unsigned integer for morton code
+ * @tparam       KeyType     32- or 64-bit unsigned integer
  * @param[in]    firstKey    first local particle SFC key
  * @param[in]    lastKey     last local particle SFC key
  * @param[in]    bucketSize  maximum number of particles per node
@@ -180,11 +186,10 @@ bool updateOctreeGpu(const KeyType* firstKey,
                      unsigned maxCount = std::numeric_limits<unsigned>::max())
 {
     nodeOps.resize(tree.size());
-    TreeNodeIndex newNumNodes =
-        computeNodeOpsGpu(rawPtr(tree), nNodes(tree), rawPtr(counts), bucketSize, rawPtr(nodeOps));
+    bool converged =
+        rebalanceDecisionGpu(rawPtr(tree), nNodes(tree), rawPtr(counts), bucketSize, rawPtr(nodeOps));
 
-    tmpTree.resize(newNumNodes + 1);
-    bool converged = rebalanceTreeGpu(rawPtr(tree), nNodes(tree), newNumNodes, rawPtr(nodeOps), rawPtr(tmpTree));
+    rebalanceTreeGpu(tree, tmpTree, rawPtr(nodeOps));
     swap(tree, tmpTree);
 
     counts.resize(nNodes(tree));

@@ -216,7 +216,7 @@ bool rebalanceDecision(
  * @tparam KeyType    32- or 64-bit integer
  * @param  nodeIndex  the node to process in @p oldTree
  * @param  oldTree    the old tree
- * @param  nodeOps    opcodes per old tree node
+ * @param  nodeOps    opcodes for each old tree node
  * @param  newTree    the new tree
  */
 template<class KeyType>
@@ -243,7 +243,6 @@ processNode(TreeNodeIndex nodeIndex, const KeyType* oldTree, const TreeNodeIndex
 
 /*! @brief split or fuse octree nodes based on node counts relative to bucketSize
  *
- * @tparam       KeyType      32- or 64-bit unsigned integer type
  * @param[in]    tree         cornerstone octree
  * @param[out]   newTree      rebalanced cornerstone octree
  * @param[in]    nodeOps      rebalance decision for each node, length @p numNodes(tree) + 1
@@ -254,8 +253,10 @@ void rebalanceTree(const InputVector& tree, OutputVector& newTree, TreeNodeIndex
 {
     TreeNodeIndex numNodes = nNodes(tree);
 
-    std::exclusive_scan(nodeOps, nodeOps + numNodes + 1, nodeOps, 0);
-    newTree.resize(nodeOps[numNodes] + 1);
+    std::exclusive_scan(nodeOps, nodeOps + numNodes + 1, nodeOps, 0); // add 1 to store the total sum
+    TreeNodeIndex newNumNodes = nodeOps[numNodes];
+
+    newTree.resize(newNumNodes + 1); // histogram size is number of nodes + 1
 
 #pragma omp parallel for schedule(static)
     for (TreeNodeIndex i = 0; i < numNodes; ++i)
@@ -275,13 +276,6 @@ void rebalanceTree(const InputVector& tree, OutputVector& newTree, TreeNodeIndex
  * @param[inout] counts      the octree leaf node particle count
  * @param[in]    maxCount    if actual node counts are higher, they will be capped to @p maxCount
  * @return                   true if tree was not modified, false otherwise
- *
- * Remarks:
- *    It is sensible to assume that the bucket size of the tree is much smaller than 2^32,
- *    and thus it is ok to use 32-bit integers for the node counts, because if the node count
- *    happens to be bigger than 2^32 for a node, this node will anyway be divided until the
- *    node count is smaller than the bucket size. We just have to make sure to prevent overflow,
- *    in MPI_Allreduce, therefore, maxCount should be set to 2^32/numRanks - 1 for distributed tree builds.
  */
 template<class KeyType>
 bool updateOctree(const KeyType* firstKey,
