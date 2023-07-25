@@ -268,8 +268,8 @@ void rebalanceTree(const InputVector& tree, OutputVector& newTree, TreeNodeIndex
 /*! @brief update the octree with a single rebalance/count step
  *
  * @tparam       KeyType     32- or 64-bit unsigned integer for SFC code
- * @param[in]    codesStart  local particle SFC codes start
- * @param[in]    codesEnd    local particle SFC codes end
+ * @param[in]    firstKey    first local particle SFC key
+ * @param[in]    lastKey     last local particle SFC key
  * @param[in]    bucketSize  maximum number of particles per node
  * @param[inout] tree        the octree leaf nodes (cornerstone format)
  * @param[inout] counts      the octree leaf node particle count
@@ -284,8 +284,8 @@ void rebalanceTree(const InputVector& tree, OutputVector& newTree, TreeNodeIndex
  *    in MPI_Allreduce, therefore, maxCount should be set to 2^32/numRanks - 1 for distributed tree builds.
  */
 template<class KeyType>
-bool updateOctree(const KeyType* codesStart,
-                  const KeyType* codesEnd,
+bool updateOctree(const KeyType* firstKey,
+                  const KeyType* lastKey,
                   unsigned bucketSize,
                   std::vector<KeyType>& tree,
                   std::vector<unsigned>& counts,
@@ -299,7 +299,7 @@ bool updateOctree(const KeyType* codesStart,
     swap(tree, tmpTree);
 
     counts.resize(nNodes(tree));
-    computeNodeCounts(tree.data(), counts.data(), nNodes(tree), codesStart, codesEnd, maxCount);
+    computeNodeCounts(tree.data(), counts.data(), nNodes(tree), firstKey, lastKey, maxCount);
 
     return converged;
 }
