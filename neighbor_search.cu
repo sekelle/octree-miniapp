@@ -74,7 +74,7 @@ void benchmarkGpu(int numParticles, bool verbose)
     auto [csTree, counts] = computeOctree(keys, keys + numParticles, bucketSize);
     OctreeData<KeyType, CpuTag> octree;
     octree.resize(nNodes(csTree));
-    updateInternalTree<KeyType>(csTree.data(), octree.data());
+    buildLinkedTree<KeyType>(csTree.data(), octree.data());
     const TreeNodeIndex* childOffsets = octree.childOffsets.data();
     const TreeNodeIndex* toLeafOrder  = octree.internalToLeaf.data();
 

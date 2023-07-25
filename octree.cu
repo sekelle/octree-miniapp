@@ -83,7 +83,7 @@ int main()
 
     OctreeData<KeyType, GpuTag> linkedOctree;
     linkedOctree.resize(nNodes(octree));
-    auto buildInternal = [&]() { buildOctreeGpu(rawPtr(octree), linkedOctree.data()); };
+    auto buildInternal = [&]() { buildLinkedTreeGpu(rawPtr(octree), linkedOctree.data()); };
 
     float internalBuildTime = timeGpu(buildInternal);
     std::cout << "linked octree build time " << internalBuildTime / 1000 << std::endl << std::endl;

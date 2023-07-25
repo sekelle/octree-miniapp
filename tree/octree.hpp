@@ -206,10 +206,6 @@ void buildOctreeCpu(const KeyType* cstoneTree,
     for (TreeNodeIndex i = 0; i < numNodes; ++i)
     {
         leafToInternal[internalToLeaf[i]] = i;
-    }
-#pragma omp parallel for schedule(static)
-    for (TreeNodeIndex i = 0; i < numNodes; ++i)
-    {
         internalToLeaf[i] -= numInternalNodes;
     }
     getLevelRangeCpu(prefixes, numNodes, levelRange);
@@ -315,7 +311,7 @@ public:
 };
 
 template<class KeyType>
-void updateInternalTree(const KeyType* leaves, OctreeView<KeyType> o)
+void buildLinkedTree(const KeyType* leaves, OctreeView<KeyType> o)
 {
     buildOctreeCpu(leaves, o.numLeafNodes, o.numInternalNodes, o.prefixes, o.childOffsets, o.parents, o.levelRange,
                    o.internalToLeaf, o.leafToInternal);

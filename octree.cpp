@@ -75,7 +75,7 @@ int main()
 
     OctreeData<KeyType, CpuTag> linkedOctree;
     linkedOctree.resize(nNodes(octree));
-    auto buildInternal = [&]() { updateInternalTree<KeyType>(rawPtr(octree), linkedOctree.data()); };
+    auto buildInternal = [&]() { buildLinkedTree<KeyType>(rawPtr(octree), linkedOctree.data()); };
 
     float internalBuildTime = timeCpu(buildInternal);
     std::cout << "linked octree build time " << internalBuildTime << std::endl << std::endl;
